@@ -8,6 +8,6 @@ import (
 )
 
 type EventRepository interface {
-	Create(ctx context.Context, event models.Events) error
+	CreateEvent(ctx context.Context, event models.Events) error
 	GetEvent(ctx context.Context, id uuid.UUID) (models.Events, error)
 }
