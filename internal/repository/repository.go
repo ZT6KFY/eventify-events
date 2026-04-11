@@ -14,4 +14,6 @@ type EventRepository interface {
 	ListEvents(ctx context.Context) ([]models.Events, error)
 	UpdateEvent(ctx context.Context, params models.UpdateEventParams, id uuid.UUID) (models.Events, error)
 	JoinEvent(ctx context.Context, userId uuid.UUID, eventId uuid.UUID) (uuid.UUID, bool, error)
+	RemoveParticipant(ctx context.Context, participantId uuid.UUID, eventId uuid.UUID) (bool, error)
+	GetEventParticipants(ctx context.Context, eventId uuid.UUID) ([]models.EventParticipants, error)
 }

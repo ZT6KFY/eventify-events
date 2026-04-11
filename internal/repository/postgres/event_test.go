@@ -150,7 +150,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.True(t, ok1)
 
 		_, ok2, err2 := repo.JoinEvent(ctx, userID, eID)
-		assert.Error(t, err2) // База должна выкинуть Unique Violation
+		assert.Error(t, err2)
 		assert.False(t, ok2)
 	})
 
@@ -162,5 +162,83 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.False(t, ok)
+	})
+	t.Run("Leave event - success", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Exit Event", EventCode: uuid.New().String()[:8],
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second), Status: models.StatusDraft,
+		}))
+
+		uID := uuid.New()
+		_, joined, err := repo.JoinEvent(ctx, uID, eID)
+		require.NoError(t, err)
+		require.True(t, joined)
+
+		left, err := repo.RemoveParticipant(ctx, uID, eID)
+
+		assert.NoError(t, err)
+		assert.True(t, left)
+	})
+
+	t.Run("Leave event - not a participant", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "No Member Event", EventCode: uuid.New().String()[:8],
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second), Status: models.StatusDraft,
+		}))
+
+		uID := uuid.New()
+
+		left, err := repo.RemoveParticipant(ctx, uID, eID)
+
+		assert.NoError(t, err)
+		assert.False(t, left)
+	})
+
+	t.Run("Leave event - twice", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Double Exit", EventCode: uuid.New().String()[:8],
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second), Status: models.StatusDraft,
+		}))
+
+		uID := uuid.New()
+		_, _, _ = repo.JoinEvent(ctx, uID, eID)
+
+		left1, _ := repo.RemoveParticipant(ctx, uID, eID)
+		assert.True(t, left1)
+
+		left2, err := repo.RemoveParticipant(ctx, uID, eID)
+		assert.NoError(t, err)
+		assert.False(t, left2)
+	})
+	t.Run("Get participants - success", func(t *testing.T) {
+		eID := uuid.New()
+		event := models.Events{
+			ID:        eID,
+			CreatorID: uuid.New(),
+			Title:     "Participants Test",
+			EventCode: uuid.New().String()[:8],
+			StartsAt:  time.Now().Add(time.Hour).Truncate(time.Second),
+			Status:    models.StatusDraft,
+		}
+		err := repo.CreateEvent(ctx, event)
+		require.NoError(t, err)
+
+		uID1 := uuid.New()
+		uID2 := uuid.New()
+
+		_, ok1, err1 := repo.JoinEvent(ctx, uID1, eID)
+		require.NoError(t, err1)
+		require.True(t, ok1)
+
+		_, ok2, err2 := repo.JoinEvent(ctx, uID2, eID)
+		require.NoError(t, err2)
+		require.True(t, ok2)
+
+		list, err := repo.GetEventParticipants(ctx, eID)
+		assert.NoError(t, err)
+		assert.Len(t, list, 2)
 	})
 }

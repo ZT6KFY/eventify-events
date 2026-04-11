@@ -177,3 +177,46 @@ func (r *EventRepository) JoinEvent(ctx context.Context, userId uuid.UUID, event
 
 	return eventId, true, nil
 }
+
+func (r *EventRepository) RemoveParticipant(ctx context.Context, participantId uuid.UUID, eventId uuid.UUID) (bool, error) {
+	sql, args, err := r.builder.
+		Delete("event_participants").
+		Where(squirrel.Eq{
+			"user_id":  participantId,
+			"event_id": eventId,
+		}).
+		ToSql()
+
+	if err != nil {
+		return false, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	res, err := r.db.Exec(ctx, sql, args...)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute delete: %w", err)
+	}
+
+	return res.RowsAffected() > 0, nil
+}
+
+func (r *EventRepository) GetEventParticipants(ctx context.Context, eventId uuid.UUID) ([]models.EventParticipants, error) {
+	sql, args, err := r.builder.Select(eventParticipantColumns...).
+		From("event_participants").
+		Where(squirrel.Eq{"event_id": eventId}).
+		OrderBy("joined_at DESC").
+		ToSql()
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to build query: %w", err)
+	}
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute query: %w", err)
+	}
+	participants, err := pgx.CollectRows(rows, pgx.RowToStructByName[models.EventParticipants])
+	if err != nil {
+		return nil, fmt.Errorf("filed to collect rows: %w", err)
+	}
+
+	return participants, nil
+}
