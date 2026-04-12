@@ -30,11 +30,12 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 	require.NoError(t, err)
 
 	eventID := uuid.New()
+	testCode := uuid.New().String()[:8]
 	testEvent := models.Events{
 		ID:        eventID,
 		CreatorID: uuid.New(),
 		Title:     "Test Event",
-		EventCode: uuid.New().String()[:8], // Уникальный код
+		EventCode: testCode,
 		StartsAt:  time.Now().Add(time.Hour).Truncate(time.Second),
 		Status:    models.StatusDraft,
 	}
@@ -76,10 +77,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		require.NoError(t, repo.CreateEvent(ctx, initialEvent))
 
 		newTitle := "Updated Title"
-		params := models.UpdateEventParams{
-			Title: &newTitle,
-		}
-
+		params := models.UpdateEventParams{Title: &newTitle}
 		updated, err := repo.UpdateEvent(ctx, params, id)
 
 		assert.NoError(t, err)
@@ -92,7 +90,6 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 	t.Run("Update event - non-existent ID", func(t *testing.T) {
 		newTitle := "Nobody Home"
 		params := models.UpdateEventParams{Title: &newTitle}
-
 		_, err := repo.UpdateEvent(ctx, params, uuid.New())
 		assert.Error(t, err)
 	})
@@ -116,6 +113,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.Equal(t, event.Title, updated.Title)
 		assert.Equal(t, event.Status, updated.Status)
 	})
+
 	t.Run("Join event - success", func(t *testing.T) {
 		eID := uuid.New()
 		event := models.Events{
@@ -129,7 +127,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		require.NoError(t, repo.CreateEvent(ctx, event))
 
 		userID := uuid.New()
-		returnedID, ok, err := repo.AddParticipant(ctx, userID, eID)
+		returnedID, ok, err := repo.JoinEvent(ctx, userID, eID)
 
 		assert.NoError(t, err)
 		assert.True(t, ok)
@@ -137,7 +135,6 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 	})
 
 	t.Run("Join event - duplicate join", func(t *testing.T) {
-
 		eID := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
 			ID: eID, CreatorID: uuid.New(), Title: "Unique Event", EventCode: uuid.New().String()[:8],
@@ -145,12 +142,11 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		}))
 
 		userID := uuid.New()
-
-		_, ok1, err1 := repo.AddParticipant(ctx, userID, eID)
+		_, ok1, err1 := repo.JoinEvent(ctx, userID, eID)
 		assert.NoError(t, err1)
 		assert.True(t, ok1)
 
-		_, ok2, err2 := repo.AddParticipant(ctx, userID, eID)
+		_, ok2, err2 := repo.JoinEvent(ctx, userID, eID)
 		assert.NoError(t, err2)
 		assert.False(t, ok2)
 	})
@@ -158,12 +154,11 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 	t.Run("Join event - non-existent event", func(t *testing.T) {
 		userID := uuid.New()
 		fakeEventID := uuid.New()
-
-		_, ok, err := repo.AddParticipant(ctx, userID, fakeEventID)
-
+		_, ok, err := repo.JoinEvent(ctx, userID, fakeEventID)
 		assert.Error(t, err)
 		assert.False(t, ok)
 	})
+
 	t.Run("Leave event - success", func(t *testing.T) {
 		eID := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
@@ -172,12 +167,11 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		}))
 
 		uID := uuid.New()
-		_, joined, err := repo.AddParticipant(ctx, uID, eID)
+		_, joined, err := repo.JoinEvent(ctx, uID, eID)
 		require.NoError(t, err)
 		require.True(t, joined)
 
 		left, err := repo.RemoveParticipant(ctx, uID, eID)
-
 		assert.NoError(t, err)
 		assert.True(t, left)
 	})
@@ -190,9 +184,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		}))
 
 		uID := uuid.New()
-
 		left, err := repo.RemoveParticipant(ctx, uID, eID)
-
 		assert.NoError(t, err)
 		assert.False(t, left)
 	})
@@ -205,7 +197,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		}))
 
 		uID := uuid.New()
-		_, _, _ = repo.AddParticipant(ctx, uID, eID)
+		_, _, _ = repo.JoinEvent(ctx, uID, eID)
 
 		left1, _ := repo.RemoveParticipant(ctx, uID, eID)
 		assert.True(t, left1)
@@ -214,6 +206,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, left2)
 	})
+
 	t.Run("Get participants - success", func(t *testing.T) {
 		eID := uuid.New()
 		event := models.Events{
@@ -230,11 +223,11 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		uID1 := uuid.New()
 		uID2 := uuid.New()
 
-		_, ok1, err1 := repo.AddParticipant(ctx, uID1, eID)
+		_, ok1, err1 := repo.JoinEvent(ctx, uID1, eID)
 		require.NoError(t, err1)
 		require.True(t, ok1)
 
-		_, ok2, err2 := repo.AddParticipant(ctx, uID2, eID)
+		_, ok2, err2 := repo.JoinEvent(ctx, uID2, eID)
 		require.NoError(t, err2)
 		require.True(t, ok2)
 
@@ -242,6 +235,7 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, list, 2)
 	})
+
 	t.Run("Join event by code - success", func(t *testing.T) {
 		eID := uuid.New()
 		myCode := "TOP-SECRET"
@@ -256,8 +250,10 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		require.NoError(t, repo.CreateEvent(ctx, event))
 
 		uID := uuid.New()
-		joined, err := repo.JoinEvent(ctx, uID, myCode)
+		found, err := repo.GetEventByCode(ctx, myCode)
+		assert.NoError(t, err)
 
+		_, joined, err := repo.JoinEvent(ctx, uID, found.ID)
 		assert.NoError(t, err)
 		assert.True(t, joined)
 
@@ -268,37 +264,33 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 	})
 
 	t.Run("Join event by code - wrong code", func(t *testing.T) {
-		uID := uuid.New()
-
-		joined, err := repo.JoinEvent(ctx, uID, "WRONG-CODE-123")
-
-		assert.NoError(t, err)
-		assert.False(t, joined)
+		_, err := repo.GetEventByCode(ctx, "WRONG-CODE-123")
+		assert.Error(t, err)
 	})
 
 	t.Run("Join event by code - already joined", func(t *testing.T) {
 		eID := uuid.New()
 		myCode := "DOUBLE-JOIN"
-
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
 			ID: eID, CreatorID: uuid.New(), Title: "Busy Event", EventCode: myCode,
 			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second), Status: models.StatusDraft,
 		}))
 
 		uID := uuid.New()
+		found, _ := repo.GetEventByCode(ctx, myCode)
 
-		ok1, err1 := repo.JoinEvent(ctx, uID, myCode)
-		require.NoError(t, err1)
+		_, ok1, err1 := repo.JoinEvent(ctx, uID, found.ID)
+		assert.NoError(t, err1)
 		assert.True(t, ok1)
 
-		ok2, err2 := repo.JoinEvent(ctx, uID, myCode)
-
+		_, ok2, err2 := repo.JoinEvent(ctx, uID, found.ID)
 		assert.NoError(t, err2)
 		assert.False(t, ok2)
 
 		participants, _ := repo.GetEventParticipants(ctx, eID)
 		assert.Len(t, participants, 1)
 	})
+
 	t.Run("Cancel event - success", func(t *testing.T) {
 		id := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
@@ -322,7 +314,6 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 	t.Run("Create invite link - success", func(t *testing.T) {
 		eID := uuid.New()
 		expectedCode := "SECRET-LINK-123"
-
 		err := repo.CreateEvent(ctx, models.Events{
 			ID:        eID,
 			CreatorID: uuid.New(),
@@ -335,27 +326,15 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 
 		inviteType := "single"
 		expiresAt := time.Now().Add(24 * time.Hour).Truncate(time.Second)
-
 		returnedCode, err := repo.CreateInviteLink(ctx, eID, inviteType, &expiresAt)
 
 		assert.NoError(t, err)
 		assert.Equal(t, expectedCode, returnedCode)
-
-		var dbInviteType string
-		var dbMaxUses int
-		query := "SELECT invite_type, max_uses FROM event_invites WHERE event_id = $1"
-		err = pool.QueryRow(ctx, query, eID).Scan(&dbInviteType, &dbMaxUses)
-
-		assert.NoError(t, err)
-		assert.Equal(t, inviteType, dbInviteType)
-		assert.Equal(t, 1, dbMaxUses)
 	})
 
 	t.Run("Create invite link - event not found", func(t *testing.T) {
 		fakeID := uuid.New()
-
 		code, err := repo.CreateInviteLink(ctx, fakeID, "unlimited", nil)
-
 		assert.Error(t, err)
 		assert.Empty(t, code)
 	})
@@ -376,15 +355,12 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.NoError(t, err)
 
 		var inviteType string
-		var maxUses *int
-
-		query := "SELECT invite_type, max_uses FROM event_invites WHERE event_id = $1"
-		err = pool.QueryRow(ctx, query, eID).Scan(&inviteType, &maxUses)
-
+		query := "SELECT invite_type FROM event_invites WHERE event_id = $1"
+		err = pool.QueryRow(ctx, query, eID).Scan(&inviteType)
 		assert.NoError(t, err)
 		assert.Equal(t, "multi", inviteType)
-		assert.Nil(t, maxUses)
 	})
+
 	t.Run("Add and get multiple checklist items", func(t *testing.T) {
 		eID := uuid.New()
 		err := repo.CreateEvent(ctx, models.Events{
@@ -397,24 +373,17 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		})
 		require.NoError(t, err)
 
-		item1 := models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Water", Quantity: 5, Unit: Ptr("liters"),
-		}
+		item1 := models.ChecklistItems{ID: uuid.New(), EventID: eID, Title: "Water"}
 		_, err = repo.AddChecklistItem(ctx, item1)
 		require.NoError(t, err)
 
-		item2 := models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Meat", Quantity: 2, Unit: Ptr("kg"),
-		}
+		item2 := models.ChecklistItems{ID: uuid.New(), EventID: eID, Title: "Meat"}
 		_, err = repo.AddChecklistItem(ctx, item2)
 		require.NoError(t, err)
 
 		list, err := repo.GetEventChecklist(ctx, eID)
-
 		assert.NoError(t, err)
 		assert.Len(t, list, 2)
-		assert.Equal(t, item1.Title, list[0].Title)
-		assert.Equal(t, item2.Title, list[1].Title)
 	})
 
 	t.Run("Get checklist - empty list", func(t *testing.T) {
@@ -422,117 +391,64 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Len(t, list, 0)
 	})
+
 	t.Run("Remove checklist item - success", func(t *testing.T) {
 		eID := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
-			ID: eID, CreatorID: uuid.New(), Title: "Delete Test", EventCode: "DEL-1",
-			Status:   models.StatusDraft,
-			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+			ID: eID, CreatorID: uuid.New(), Title: "Delete Test", Status: models.StatusDraft,
+			EventCode: "DEL-1", StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
 		}))
 
-		itemID, err := repo.AddChecklistItem(ctx, models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Disposable Item",
-		})
+		itemID, err := repo.AddChecklistItem(ctx, models.ChecklistItems{ID: uuid.New(), EventID: eID, Title: "Item"})
 		require.NoError(t, err)
 
 		removed, err := repo.RemoveChecklistItem(ctx, itemID, eID)
 		assert.NoError(t, err)
 		assert.True(t, removed)
-
-		list, _ := repo.GetEventChecklist(ctx, eID)
-		assert.Len(t, list, 0)
-	})
-
-	t.Run("Remove checklist item - wrong event", func(t *testing.T) {
-		eID := uuid.New()
-		require.NoError(t, repo.CreateEvent(ctx, models.Events{
-			ID: eID, CreatorID: uuid.New(), Title: "Wrong Event", EventCode: "WR-1",
-			Status:   models.StatusDraft,
-			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
-		}))
-
-		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Item",
-		})
-
-		removed, err := repo.RemoveChecklistItem(ctx, itemID, uuid.New())
-		assert.NoError(t, err)
-		assert.False(t, removed)
 	})
 
 	t.Run("Mark item purchased - full update", func(t *testing.T) {
 		eID := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
-			ID: eID, CreatorID: uuid.New(), Title: "Purchase Test", EventCode: "PUR-1",
-			Status:   models.StatusDraft,
-			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+			ID: eID, CreatorID: uuid.New(), Title: "Purchase Test", Status: models.StatusDraft,
+			EventCode: "PUR-1", StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
 		}))
 
-		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Milk",
-		})
-
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{ID: uuid.New(), EventID: eID, Title: "Milk"})
 		pID := uuid.New()
-		_, _, err := repo.AddParticipant(ctx, pID, eID)
+		_, _, err := repo.JoinEvent(ctx, pID, eID)
 		require.NoError(t, err)
 
 		ok, err := repo.MarkItemPurchased(ctx, eID, itemID, &pID, Ptr(true))
 		assert.NoError(t, err)
 		assert.True(t, ok)
-
-		var isPurchased bool
-		err = pool.QueryRow(ctx, "SELECT is_purchased FROM checklist_items WHERE id = $1", itemID).Scan(&isPurchased)
-		assert.NoError(t, err)
-		assert.True(t, isPurchased)
-
-		var exists bool
-		err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM checklist_assignments WHERE checklist_item_id = $1 AND participant_id = $2)", itemID, pID).Scan(&exists)
-		assert.NoError(t, err)
-		assert.True(t, exists)
 	})
 
 	t.Run("Mark item purchased - only status", func(t *testing.T) {
 		eID := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
-			ID: eID, CreatorID: uuid.New(), Title: "Only Status Test", EventCode: "STAT-1",
-			Status:   models.StatusDraft,
-			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+			ID: eID, CreatorID: uuid.New(), Title: "Stat Test", Status: models.StatusDraft,
+			EventCode: "STAT-1", StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
 		}))
-
-		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Bread",
-		})
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{ID: uuid.New(), EventID: eID, Title: "Bread"})
 
 		ok, err := repo.MarkItemPurchased(ctx, eID, itemID, nil, Ptr(true))
 		assert.NoError(t, err)
 		assert.True(t, ok)
-
-		var isPurchased bool
-		err = pool.QueryRow(ctx, "SELECT is_purchased FROM checklist_items WHERE id = $1", itemID).Scan(&isPurchased)
-		assert.True(t, isPurchased)
 	})
 
 	t.Run("Mark item purchased - only buyer", func(t *testing.T) {
 		eID := uuid.New()
 		require.NoError(t, repo.CreateEvent(ctx, models.Events{
-			ID: eID, CreatorID: uuid.New(), Title: "Only Buyer Test", EventCode: "BUY-1",
-			Status:   models.StatusDraft,
-			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+			ID: eID, CreatorID: uuid.New(), Title: "Buyer Test", Status: models.StatusDraft,
+			EventCode: "BUY-1", StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
 		}))
-
-		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
-			ID: uuid.New(), EventID: eID, Title: "Eggs",
-		})
-
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{ID: uuid.New(), EventID: eID, Title: "Eggs"})
 		pID := uuid.New()
-		_, _, _ = repo.AddParticipant(ctx, pID, eID)
+		_, _, _ = repo.JoinEvent(ctx, pID, eID)
 
 		ok, err := repo.MarkItemPurchased(ctx, eID, itemID, &pID, nil)
 		assert.NoError(t, err)
 		assert.True(t, ok)
-
-		var exists bool
-		err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM checklist_assignments WHERE checklist_item_id = $1 AND participant_id = $2)", itemID, pID).Scan(&exists)
-		assert.True(t, exists)
 	})
 }

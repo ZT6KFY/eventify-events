@@ -154,34 +154,32 @@ func (r *EventRepository) UpdateEvent(ctx context.Context, params models.UpdateE
 	return r.GetEvent(ctx, id)
 }
 
-func (r *EventRepository) JoinEvent(ctx context.Context, userId uuid.UUID, code string) (bool, error) {
-	sql, args, err := r.builder.Select("id").
+func (r *EventRepository) GetEventByCode(ctx context.Context, code string) (models.Events, error) {
+	sql, args, err := r.builder.Select(eventColumns...).
 		From("events").
 		Where(squirrel.Eq{"event_code": code}).
 		ToSql()
 
 	if err != nil {
-		return false, fmt.Errorf("failed to build query: %w", err)
+		return models.Events{}, fmt.Errorf("failed to build query: %w", err)
 	}
 
-	var eventId uuid.UUID
-	err = r.db.QueryRow(ctx, sql, args...).Scan(&eventId)
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return models.Events{}, fmt.Errorf("failed to execute query: %w", err)
+	}
 
+	event, err := pgx.CollectOneRow(rows, pgx.RowToStructByName[models.Events])
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil
+			return models.Events{}, fmt.Errorf("event with code %s nof found: %w", code, err)
 		}
-		return false, fmt.Errorf("failed to find event by code: %w", err)
+		return models.Events{}, err
 	}
-
-	_, joined, err := r.AddParticipant(ctx, userId, eventId)
-	if err != nil {
-		return false, fmt.Errorf("failed to add participant: %w", err)
-	}
-	return joined, nil
+	return event, nil
 }
 
-func (r *EventRepository) AddParticipant(ctx context.Context, userId uuid.UUID, eventId uuid.UUID) (uuid.UUID, bool, error) {
+func (r *EventRepository) JoinEvent(ctx context.Context, userId uuid.UUID, eventId uuid.UUID) (uuid.UUID, bool, error) {
 	p := models.EventParticipants{
 		ID:       uuid.New(),
 		UserID:   userId,
