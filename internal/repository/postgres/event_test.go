@@ -385,4 +385,154 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		assert.Equal(t, "multi", inviteType)
 		assert.Nil(t, maxUses)
 	})
+	t.Run("Add and get multiple checklist items", func(t *testing.T) {
+		eID := uuid.New()
+		err := repo.CreateEvent(ctx, models.Events{
+			ID:        eID,
+			CreatorID: uuid.New(),
+			Title:     "Party List",
+			EventCode: "LIST-1",
+			StartsAt:  time.Now().Add(time.Hour).Truncate(time.Second),
+			Status:    models.StatusDraft,
+		})
+		require.NoError(t, err)
+
+		item1 := models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Water", Quantity: 5, Unit: Ptr("liters"),
+		}
+		_, err = repo.AddChecklistItem(ctx, item1)
+		require.NoError(t, err)
+
+		item2 := models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Meat", Quantity: 2, Unit: Ptr("kg"),
+		}
+		_, err = repo.AddChecklistItem(ctx, item2)
+		require.NoError(t, err)
+
+		list, err := repo.GetEventChecklist(ctx, eID)
+
+		assert.NoError(t, err)
+		assert.Len(t, list, 2)
+		assert.Equal(t, item1.Title, list[0].Title)
+		assert.Equal(t, item2.Title, list[1].Title)
+	})
+
+	t.Run("Get checklist - empty list", func(t *testing.T) {
+		list, err := repo.GetEventChecklist(ctx, uuid.New())
+		assert.NoError(t, err)
+		assert.Len(t, list, 0)
+	})
+	t.Run("Remove checklist item - success", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Delete Test", EventCode: "DEL-1",
+			Status:   models.StatusDraft,
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+		}))
+
+		itemID, err := repo.AddChecklistItem(ctx, models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Disposable Item",
+		})
+		require.NoError(t, err)
+
+		removed, err := repo.RemoveChecklistItem(ctx, itemID, eID)
+		assert.NoError(t, err)
+		assert.True(t, removed)
+
+		list, _ := repo.GetEventChecklist(ctx, eID)
+		assert.Len(t, list, 0)
+	})
+
+	t.Run("Remove checklist item - wrong event", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Wrong Event", EventCode: "WR-1",
+			Status:   models.StatusDraft,
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+		}))
+
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Item",
+		})
+
+		removed, err := repo.RemoveChecklistItem(ctx, itemID, uuid.New())
+		assert.NoError(t, err)
+		assert.False(t, removed)
+	})
+
+	t.Run("Mark item purchased - full update", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Purchase Test", EventCode: "PUR-1",
+			Status:   models.StatusDraft,
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+		}))
+
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Milk",
+		})
+
+		pID := uuid.New()
+		_, _, err := repo.AddParticipant(ctx, pID, eID)
+		require.NoError(t, err)
+
+		ok, err := repo.MarkItemPurchased(ctx, eID, itemID, &pID, Ptr(true))
+		assert.NoError(t, err)
+		assert.True(t, ok)
+
+		var isPurchased bool
+		err = pool.QueryRow(ctx, "SELECT is_purchased FROM checklist_items WHERE id = $1", itemID).Scan(&isPurchased)
+		assert.NoError(t, err)
+		assert.True(t, isPurchased)
+
+		var exists bool
+		err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM checklist_assignments WHERE checklist_item_id = $1 AND participant_id = $2)", itemID, pID).Scan(&exists)
+		assert.NoError(t, err)
+		assert.True(t, exists)
+	})
+
+	t.Run("Mark item purchased - only status", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Only Status Test", EventCode: "STAT-1",
+			Status:   models.StatusDraft,
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+		}))
+
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Bread",
+		})
+
+		ok, err := repo.MarkItemPurchased(ctx, eID, itemID, nil, Ptr(true))
+		assert.NoError(t, err)
+		assert.True(t, ok)
+
+		var isPurchased bool
+		err = pool.QueryRow(ctx, "SELECT is_purchased FROM checklist_items WHERE id = $1", itemID).Scan(&isPurchased)
+		assert.True(t, isPurchased)
+	})
+
+	t.Run("Mark item purchased - only buyer", func(t *testing.T) {
+		eID := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID: eID, CreatorID: uuid.New(), Title: "Only Buyer Test", EventCode: "BUY-1",
+			Status:   models.StatusDraft,
+			StartsAt: time.Now().Add(time.Hour).Truncate(time.Second),
+		}))
+
+		itemID, _ := repo.AddChecklistItem(ctx, models.ChecklistItems{
+			ID: uuid.New(), EventID: eID, Title: "Eggs",
+		})
+
+		pID := uuid.New()
+		_, _, _ = repo.AddParticipant(ctx, pID, eID)
+
+		ok, err := repo.MarkItemPurchased(ctx, eID, itemID, &pID, nil)
+		assert.NoError(t, err)
+		assert.True(t, ok)
+
+		var exists bool
+		err = pool.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM checklist_assignments WHERE checklist_item_id = $1 AND participant_id = $2)", itemID, pID).Scan(&exists)
+		assert.True(t, exists)
+	})
 }

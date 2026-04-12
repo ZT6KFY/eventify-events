@@ -22,6 +22,7 @@ type EventRepository struct {
 
 var eventColumns = []string{"id", "creator_id", "is_private", "title", "description", "starts_at", "duration", "location_name", "location_coords", "max_participants", "status", "event_code", "created_at", "updated_at"}
 var eventParticipantColumns = []string{"id", "user_id", "event_id", "is_owner", "can_edit_event", "can_manage_participants", "can_manage_checklist", "role", "status", "joined_at", "left_at"}
+var eventChecklistColumns = []string{"id", "event_id", "title", "quantity", "unit", "is_purchased", "created_at"}
 
 func NewEventRepository(db *pgxpool.Pool) *EventRepository {
 	return &EventRepository{
@@ -30,7 +31,6 @@ func NewEventRepository(db *pgxpool.Pool) *EventRepository {
 	}
 }
 
-// create
 func (r *EventRepository) CreateEvent(ctx context.Context, e models.Events) error {
 	sql, args, err := r.builder.Insert("events").
 		Columns(eventColumns...).
@@ -46,7 +46,6 @@ func (r *EventRepository) CreateEvent(ctx context.Context, e models.Events) erro
 	return nil
 }
 
-// read
 func (r *EventRepository) GetEvent(ctx context.Context, id uuid.UUID) (models.Events, error) {
 	sql, args, err := r.builder.Select(eventColumns...).
 		From("events").
@@ -306,4 +305,110 @@ func (r *EventRepository) CreateInviteLink(ctx context.Context, eventId uuid.UUI
 	}
 
 	return eventCode, nil
+}
+
+func (r *EventRepository) AddChecklistItem(ctx context.Context, e models.ChecklistItems) (uuid.UUID, error) {
+	sql, args, err := r.builder.Insert("checklist_items").
+		Columns(eventChecklistColumns...).
+		Values(e.Values()...).
+		Suffix("RETURNING id").
+		ToSql()
+
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	var itemID uuid.UUID
+	err = r.db.QueryRow(ctx, sql, args...).Scan(&itemID)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("failed to insert and scan id: %w", err)
+	}
+	return itemID, nil
+}
+
+func (r *EventRepository) GetEventChecklist(ctx context.Context, eventId uuid.UUID) ([]models.ChecklistItems, error) {
+	sql, args, err := r.builder.Select(eventChecklistColumns...).
+		From("checklist_items").
+		Where(squirrel.Eq{"event_id": eventId}).
+		OrderBy("created_at ASC").
+		ToSql()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	rows, err := r.db.Query(ctx, sql, args...)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get event_checklist: %w", err)
+	}
+	eventChecklist, err := pgx.CollectRows(rows, pgx.RowToStructByName[models.ChecklistItems])
+	if err != nil {
+		return nil, fmt.Errorf("failed to collect row: %w", err)
+	}
+	return eventChecklist, nil
+}
+
+func (r *EventRepository) RemoveChecklistItem(ctx context.Context, itemId uuid.UUID, eventId uuid.UUID) (bool, error) {
+	sql, args, err := r.builder.
+		Delete("checklist_items").
+		Where(squirrel.Eq{
+			"id":       itemId,
+			"event_id": eventId,
+		}).ToSql()
+
+	if err != nil {
+		return false, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	res, err := r.db.Exec(ctx, sql, args...)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute delete: %w", err)
+	}
+	return res.RowsAffected() > 0, nil
+}
+
+func (r *EventRepository) MarkItemPurchased(ctx context.Context, eventId uuid.UUID, itemId uuid.UUID, buyerId *uuid.UUID, isPurchased *bool) (bool, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return false, fmt.Errorf("failed to begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	if isPurchased != nil {
+		sql, args, err := r.builder.
+			Update("checklist_items").
+			Set("is_purchased", *isPurchased).
+			Where(squirrel.Eq{"id": itemId}).
+			ToSql()
+
+		if err != nil {
+			return false, fmt.Errorf("failed to build update item query: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			return false, fmt.Errorf("failed to update item status: %w", err)
+		}
+	}
+
+	if buyerId != nil {
+		sql, args, err := r.builder.
+			Insert("checklist_assignments").
+			Columns("checklist_item_id", "participant_id").
+			Values(itemId, *buyerId).
+			Suffix("ON CONFLICT (checklist_item_id, participant_id) DO NOTHING").
+			ToSql()
+
+		if err != nil {
+			return false, fmt.Errorf("failed to build assignment query: %w", err)
+		}
+
+		if _, err := tx.Exec(ctx, sql, args...); err != nil {
+			return false, fmt.Errorf("failed to assign buyer: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return false, fmt.Errorf("failed to commit tx: %w", err)
+	}
+
+	return true, nil
 }
