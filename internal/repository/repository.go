@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"eventify-events/internal/models"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -16,4 +17,6 @@ type EventRepository interface {
 	JoinEvent(ctx context.Context, userId uuid.UUID, eventId uuid.UUID) (uuid.UUID, bool, error)
 	RemoveParticipant(ctx context.Context, participantId uuid.UUID, eventId uuid.UUID) (bool, error)
 	GetEventParticipants(ctx context.Context, eventId uuid.UUID) ([]models.EventParticipants, error)
+	CancelEvent(ctx context.Context, eventId uuid.UUID) (bool, error)
+	CreateInviteLink(ctx context.Context, eventId uuid.UUID, inviteType string, expiresAt *time.Time) (string, error)
 }

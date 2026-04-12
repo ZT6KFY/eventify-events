@@ -250,3 +250,60 @@ func (r *EventRepository) GetEventParticipants(ctx context.Context, eventId uuid
 
 	return participants, nil
 }
+
+func (r *EventRepository) CancelEvent(ctx context.Context, eventId uuid.UUID) (bool, error) {
+	sql, args, err := r.builder.
+		Update("events").
+		Set("status", models.StatusCancelled).
+		Where(squirrel.Eq{"id": eventId}).
+		ToSql()
+	if err != nil {
+		return false, fmt.Errorf("failed to build query: %w", err)
+	}
+
+	res, err := r.db.Exec(ctx, sql, args...)
+	if err != nil {
+		return false, fmt.Errorf("failed to execute update: %w", err)
+	}
+
+	return res.RowsAffected() > 0, nil
+}
+
+func (r *EventRepository) CreateInviteLink(ctx context.Context, eventId uuid.UUID, inviteType string, expiresAt *time.Time) (string, error) {
+	var maxUses *int
+	if inviteType == "single" {
+		val := 1
+		maxUses = &val
+	}
+
+	insertSQL, insertArgs, err := r.builder.Insert("event_invites").
+		Columns("event_id", "invite_type", "expires_at", "max_uses").
+		Values(eventId, inviteType, expiresAt, maxUses).
+		ToSql()
+
+	if err != nil {
+		return "", fmt.Errorf("failed to build insert: %w", err)
+	}
+
+	if _, err := r.db.Exec(ctx, insertSQL, insertArgs...); err != nil {
+		return "", fmt.Errorf("failed to insert invite: %w", err)
+	}
+
+	selectSQL, selectArgs, err := r.builder.
+		Select("event_code").
+		From("events").
+		Where(squirrel.Eq{"id": eventId}).
+		ToSql()
+
+	if err != nil {
+		return "", fmt.Errorf("failed to build select: %w", err)
+	}
+
+	var eventCode string
+	err = r.db.QueryRow(ctx, selectSQL, selectArgs...).Scan(&eventCode)
+	if err != nil {
+		return "", fmt.Errorf("failed to get event code: %w", err)
+	}
+
+	return eventCode, nil
+}

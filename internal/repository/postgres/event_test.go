@@ -299,4 +299,90 @@ func TestEventRepository_CreateAndGet(t *testing.T) {
 		participants, _ := repo.GetEventParticipants(ctx, eID)
 		assert.Len(t, participants, 1)
 	})
+	t.Run("Cancel event - success", func(t *testing.T) {
+		id := uuid.New()
+		require.NoError(t, repo.CreateEvent(ctx, models.Events{
+			ID:        id,
+			CreatorID: uuid.New(),
+			Title:     "To Be Cancelled",
+			EventCode: "CANCEL-ME",
+			Status:    models.StatusDraft,
+			StartsAt:  time.Now().Add(time.Hour).Truncate(time.Second),
+		}))
+
+		ok, err := repo.CancelEvent(ctx, id)
+		assert.NoError(t, err)
+		assert.True(t, ok)
+
+		updated, err := repo.GetEvent(ctx, id)
+		assert.NoError(t, err)
+		assert.Equal(t, models.StatusCancelled, updated.Status)
+	})
+
+	t.Run("Create invite link - success", func(t *testing.T) {
+		eID := uuid.New()
+		expectedCode := "SECRET-LINK-123"
+
+		err := repo.CreateEvent(ctx, models.Events{
+			ID:        eID,
+			CreatorID: uuid.New(),
+			Title:     "Invite Only Event",
+			EventCode: expectedCode,
+			StartsAt:  time.Now().Add(time.Hour).Truncate(time.Second),
+			Status:    models.StatusDraft,
+		})
+		require.NoError(t, err)
+
+		inviteType := "single"
+		expiresAt := time.Now().Add(24 * time.Hour).Truncate(time.Second)
+
+		returnedCode, err := repo.CreateInviteLink(ctx, eID, inviteType, &expiresAt)
+
+		assert.NoError(t, err)
+		assert.Equal(t, expectedCode, returnedCode)
+
+		var dbInviteType string
+		var dbMaxUses int
+		query := "SELECT invite_type, max_uses FROM event_invites WHERE event_id = $1"
+		err = pool.QueryRow(ctx, query, eID).Scan(&dbInviteType, &dbMaxUses)
+
+		assert.NoError(t, err)
+		assert.Equal(t, inviteType, dbInviteType)
+		assert.Equal(t, 1, dbMaxUses)
+	})
+
+	t.Run("Create invite link - event not found", func(t *testing.T) {
+		fakeID := uuid.New()
+
+		code, err := repo.CreateInviteLink(ctx, fakeID, "unlimited", nil)
+
+		assert.Error(t, err)
+		assert.Empty(t, code)
+	})
+
+	t.Run("Check multi invite in DB", func(t *testing.T) {
+		eID := uuid.New()
+		err := repo.CreateEvent(ctx, models.Events{
+			ID:        eID,
+			CreatorID: uuid.New(),
+			Title:     "Multi Invite Test",
+			EventCode: "MULTI-123",
+			StartsAt:  time.Now().Add(time.Hour).Truncate(time.Second),
+			Status:    models.StatusDraft,
+		})
+		require.NoError(t, err)
+
+		_, err = repo.CreateInviteLink(ctx, eID, "multi", nil)
+		assert.NoError(t, err)
+
+		var inviteType string
+		var maxUses *int
+
+		query := "SELECT invite_type, max_uses FROM event_invites WHERE event_id = $1"
+		err = pool.QueryRow(ctx, query, eID).Scan(&inviteType, &maxUses)
+
+		assert.NoError(t, err)
+		assert.Equal(t, "multi", inviteType)
+		assert.Nil(t, maxUses)
+	})
 }
