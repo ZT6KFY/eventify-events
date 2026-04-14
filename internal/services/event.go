@@ -112,14 +112,17 @@ func (s *EventService) JoinEvent(ctx context.Context, userId uuid.UUID, code str
 	if checkEventStatus(event.Status) != nil {
 		return false, fmt.Errorf("event with code %s is %s", code, event.Status)
 	}
-	_, joined, err := s.repo.JoinEvent(ctx, userId, event.ID)
+	_, joined, err := s.repo.JoinEvent(ctx, userId, event.ID, false)
 	if err != nil {
 		return false, fmt.Errorf("Service.JoinEvent : %w", err)
 	}
 	return joined, nil
 }
 
-
+func (s *EventService) CreateEvent(ctx context.Context, callerId uuid.UUID, eventParams models.Events) (models.Events, error) {
+	
+	
+}
 func (s *EventService) RemoveParticipant(ctx context.Context, callerId uuid.UUID, participantId uuid.UUID, eventId uuid.UUID) (bool, error) {
 	err := s.checkPermission(ctx, callerId, eventId, "can_manage_participants")
 	if err != nil {
