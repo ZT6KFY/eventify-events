@@ -1,9 +1,20 @@
+package api
+
+import (
+	"context"
+	"eventify-events/internal/models"
+	"time"
+	"github.com/google/uuid"
+	"eventify-events/internal/services"
+)
 type EventServiceInterface interface {
     GetEvent(ctx context.Context, id uuid.UUID) (*models.Events, error)
     ListEvents(ctx context.Context) ([]models.Events, error)
     ListUserEvents(ctx context.Context, userID uuid.UUID) ([]models.Events, error)
+    CreateEvent(ctx context.Context, callerID uuid.UUID, eventParams services.EventInputParams) (models.Events, error)
     UpdateEvent(ctx context.Context, callerID uuid.UUID, eventID uuid.UUID, params models.UpdateEventParams) (models.Events, error)
     JoinEvent(ctx context.Context, userID uuid.UUID, code string) (bool, error)
+    LeaveEvent(ctx context.Context, callerID uuid.UUID, eventID uuid.UUID) (bool, error)
     RemoveParticipant(ctx context.Context, callerID uuid.UUID, participantID uuid.UUID, eventID uuid.UUID) (bool, error)
     GetEventParticipants(ctx context.Context, eventID uuid.UUID) ([]models.EventParticipants, error)
     CancelEvent(ctx context.Context, callerID uuid.UUID, eventID uuid.UUID) (bool, error)

@@ -104,13 +104,13 @@ func (s *EventService) JoinEvent(ctx context.Context, userId uuid.UUID, code str
 	if err != nil {
 		return false, fmt.Errorf("Service.GetEventByCode : %w", err)
 	}
-	particapants, err := s.repo.GetEventParticipants(ctx, event.ID)
+	participants, err := s.repo.GetEventParticipants(ctx, event.ID)
 	if err != nil {
 		return false, fmt.Errorf("Service.GetEventParticipants : %w", err)
 	}
 
 
-	if event.MaxParticipants != nil && *event.MaxParticipants != 0 && len(particapants) >= *event.MaxParticipants {
+	if event.MaxParticipants != nil && *event.MaxParticipants != 0 && len(participants) >= *event.MaxParticipants {
 		return false, fmt.Errorf("event with code %s is full", code)
 	}
 
@@ -118,6 +118,20 @@ func (s *EventService) JoinEvent(ctx context.Context, userId uuid.UUID, code str
 	if checkEventStatus(event.Status) != nil {
 		return false, fmt.Errorf("event with code %s is %s", code, event.Status)
 	}
+	if event.IsPrivate {
+		invite, err := s.repo.GetInviteByToken(ctx, code)
+		if err != nil {
+			return false, fmt.Errorf("Service.GetInviteByToken : %w", err)
+		}
+		if invite.ExpiresAt != nil && invite.ExpiresAt.Before(time.Now()) {
+			return false, fmt.Errorf("invite with code %s is expired", code)
+		}
+		_, err = s.repo.UseInvite(ctx, invite.ID)
+		if err != nil {
+			return false, fmt.Errorf("Service.UseInvite : %w", err)
+		}
+	}
+
 	_, joined, err := s.repo.JoinEvent(ctx, userId, event.ID, false)
 	if err != nil {
 		return false, fmt.Errorf("Service.JoinEvent : %w", err)
@@ -160,12 +174,12 @@ func (s *EventService) RemoveParticipant(ctx context.Context, callerId uuid.UUID
 	}
 
 
-	particapant, err := s.repo.GetParticipant(ctx, participantId, eventId)
+	participant, err := s.repo.GetParticipant(ctx, participantId, eventId)
 	if err != nil {
 		return false, fmt.Errorf("Service.RemoveParticipant : %w", err)
 	}
 
-	if particapant.IsOwner {
+	if participant.IsOwner {
 		return false, fmt.Errorf("Service.RemoveParticipant : can't remove creator")
 	}
 
@@ -176,13 +190,15 @@ func (s *EventService) RemoveParticipant(ctx context.Context, callerId uuid.UUID
 	return removed, nil
 }
 
-func (s* EventService) GetEventParticapants(ctx context.Context, eventId uuid.UUID) ([]models.EventParticipants, error) {
+
+func (s* EventService) GetEventParticipants(ctx context.Context, eventId uuid.UUID) ([]models.EventParticipants, error) {
 	participants, err := s.repo.GetEventParticipants(ctx, eventId)
 	if err != nil {
-		return nil, fmt.Errorf("Service.GetEventParticapants : %w", err)
+		return nil, fmt.Errorf("Service.GetEventParticipants : %w", err)
 	}
 	return participants, nil
 }
+
 
 func (s* EventService) CancelEvent(ctx context.Context, callerId uuid.UUID, eventId uuid.UUID) (bool, error) {
 	err := s.checkPermission(ctx, callerId, eventId, "can_edit_event")
@@ -235,4 +251,20 @@ func (s* EventService) UpdateEvent(ctx context.Context, callerId uuid.UUID, even
 	}
 
 	return s.repo.UpdateEvent(ctx, params, eventId)
+}
+
+func (s* EventService) LeaveEvent(ctx context.Context, callerId uuid.UUID, eventId uuid.UUID) (bool, error) {
+	participant, err := s.repo.GetParticipant(ctx, callerId, eventId)
+	if err != nil {
+		return false, fmt.Errorf("Service.LeaveEvent : %w", err)
+	}
+	if participant.IsOwner {
+		return false, fmt.Errorf("Service.LeaveEvent : owner can't leave")
+	}
+
+	_, err = s.repo.RemoveParticipant(ctx, callerId, eventId)
+	if err != nil {
+		return false, fmt.Errorf("Service.LeaveEvent : %w", err)
+	}
+	return true, nil
 }
