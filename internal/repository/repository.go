@@ -28,3 +28,4 @@ type EventRepository interface {
 	UseInvite(ctx context.Context, inviteId uuid.UUID) (bool, error)
 	GetParticipant(ctx context.Context, userId uuid.UUID, eventId uuid.UUID) (models.EventParticipants, error)
 }
+	
