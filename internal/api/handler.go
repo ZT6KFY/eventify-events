@@ -308,3 +308,98 @@ func (h* EventHandler) RemoveParticipant (ctx context.Context, req *v1.RemovePar
 	}
 	return &v1.RemoveParticipantResponse{Success: success}, nil
 }
+
+
+
+// Checklist handlers
+
+func (h* EventHandler) AddChecklistItem (ctx context.Context, req *v1.AddChecklistItemRequest) (*v1.AddChecklistItemResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	itemID, err := h.checklistService.AddChecklistItem(ctx, callerId, eventId, req.Title, int(req.Quantity), req.Unit)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to add checklist item: %v", err)
+	}
+	return &v1.AddChecklistItemResponse{ItemId: itemID.String()}, nil
+}
+
+func (h* EventHandler) RemoveChecklistItem (ctx context.Context, req *v1.RemoveChecklistItemRequest) (*v1.RemoveChecklistItemResponse, error){
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	itemId, err := uuid.Parse(req.ItemId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid item id")
+	}
+	success, err := h.checklistService.RemoveChecklistItem(ctx, callerId, eventId, itemId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to remove checklist item: %v", err)
+	}
+	return &v1.RemoveChecklistItemResponse{Success: success}, nil
+}
+
+func (h* EventHandler) MarkItemPurchased (ctx context.Context, req *v1.MarkItemPurchasedRequest) (*v1.MarkItemPurchasedResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	itemId, err := uuid.Parse(req.ItemId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid item id")
+	}
+
+	if req.BuyerId == nil {
+		return nil, status.Errorf(codes.InvalidArgument, "buyer id is required")
+	}
+
+	var buyerId *uuid.UUID
+	if req.BuyerId != nil {
+		parsed, err := uuid.Parse(*req.BuyerId)
+		if err != nil {
+			return nil, status.Errorf(codes.InvalidArgument, "invalid buyer id")
+		}
+		buyerId = &parsed
+	}
+
+	success, err := h.checklistService.MarkItemPurchased(ctx, callerId, eventId, itemId, buyerId, req.IsPurchased)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to remove checklist item: %v", err)
+	}
+	return &v1.MarkItemPurchasedResponse{Success: success}, nil
+}
+
+func (h* EventHandler) GetEventChecklist (ctx context.Context, req *v1.GetEventChecklistRequest) (*v1.GetEventChecklistResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	checklist, err := h.checklistService.GetEventChecklist(ctx, callerId, eventId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get event checklist: %v", err)
+	}
+	checklistItems := checklistToProto(checklist)
+	response := &v1.GetEventChecklistResponse{
+		Checklist: checklistItems,
+	}
+	return response, nil
+}

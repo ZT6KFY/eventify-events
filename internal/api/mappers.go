@@ -46,6 +46,24 @@ func participantsToProto(participants []models.EventParticipants) ([]*v1.Partici
 	}
 	return participantsInfo
 }
+
+func checklistToProto(items []models.ChecklistItems) []*v1.ChecklistItemInfo {
+    result := make([]*v1.ChecklistItemInfo, 0, len(items))
+    for _, item := range items {
+        unit := ""
+        if item.Unit != nil {
+            unit = *item.Unit
+        }
+        result = append(result, &v1.ChecklistItemInfo{
+            Id:          item.ID.String(),
+            Title:       item.Title,
+            Quantity:    int32(item.Quantity),
+            Unit:        unit,
+            IsPurchased: &item.IsPurchased,
+        })
+    }
+    return result
+}
 func parseCoords(coords *string) (*pgtype.Point, error) {
 	if coords == nil {
 		return nil, nil
