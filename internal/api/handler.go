@@ -2,9 +2,12 @@ package api
 
 import (
 	"context"
+	"eventify-events/internal/models"
+	"eventify-events/internal/services"
 	"eventify-events/pkg/api/v1"
 	"log/slog"
 	"time"
+
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"google.golang.org/grpc/codes"
@@ -13,6 +16,7 @@ import (
 
 const (
 	microsecondsPerDay = 24 * 60 * 60 * 1000000
+	microsecondsPerMinute = 60 * 1000000
 	microsecondsPerMonth = 30 * microsecondsPerDay
 )
 
@@ -58,7 +62,26 @@ func (h *EventHandler) GetEvent(ctx context.Context, req *v1.GetEventRequest) (*
 }
 
 func (h *EventHandler) ListEvents(ctx context.Context, req *v1.ListEventsRequest) (*v1.ListEventsResponse, error) {
-	events, err := h.eventService.ListEvents(ctx, services.ListEventsFilter{})
+	var startsAfter *time.Time
+	if req.StartsAfter != nil {
+		t := req.StartsAfter.AsTime()
+		startsAfter = &t
+	}
+	var startsBeforeFIlter *time.Time
+	if req.StartsBefore != nil {
+		t := req.StartsBefore.AsTime()
+		startsBeforeFIlter = &t
+	}
+
+	filter := services.ListEventsFilter{
+		Title: req.Title,
+		Description: req.Description,
+		StartsAfter: startsAfter,
+		StartsBefore: startsBeforeFIlter,
+		LocationName: req.LocationName,
+	}
+
+	events, err := h.eventService.ListEvents(ctx, filter)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "failed to list events: %v", err)
 	}
@@ -67,4 +90,221 @@ func (h *EventHandler) ListEvents(ctx context.Context, req *v1.ListEventsRequest
 		response = append(response, eventToProto(&event))
 	}
 	return &v1.ListEventsResponse{Events: response}, nil
+}
+
+// Ожидает контекст с user_id, для этого использовать api/context.ContextWithUserID
+func (h *EventHandler) ListUserEvents (ctx context.Context, req *v1.ListUserEventsRequest) (*v1.ListUserEventsResponse, error) {
+	userId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	events, err := h.eventService.ListUserEvents(ctx, userId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to list user events: %v", err)
+	}
+	response := make([]*v1.EventInfo, 0, len(events))
+	for _, event := range events {
+		response = append(response, eventToProto(&event))
+	}
+	return &v1.ListUserEventsResponse{Events: response}, nil
+}
+
+func (h* EventHandler) CreateEvent(ctx context.Context, req *v1.CreateEventRequest) (*v1.CreateEventResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	duration := pgtype.Interval{
+		Microseconds: int64(req.DurationMinutes * microsecondsPerMinute),
+		Valid: true,
+	}
+	
+
+	desc, locName := &req.Description, &req.LocationName
+	if req.Description == "" {
+		desc = nil
+	}
+	if req.LocationName == "" {
+		locName = nil
+	}
+
+	locCoords, err := parseCoords(req.LocationCoords)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid location coordinates")
+	}
+	maxParticipants := int(req.MaxParticipants)
+
+
+	eventParams := &services.EventInputParams{
+		IsPrivate: req.IsPrivate,
+		Title: req.Title,
+		Description: desc,
+		StartsAt: req.StartsAt.AsTime(),
+		Duration: duration,
+		LocationName: locName,
+		LocationCoords: locCoords,
+		MaxParticipants: &maxParticipants,
+	}
+	event, err := h.eventService.CreateEvent(ctx, callerId, *eventParams)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create event: %v", err)
+	}
+	id := event.ID.String()
+	response := &v1.CreateEventResponse{
+		Id: id,
+	}
+
+	return response, nil
+}
+
+func (h* EventHandler) UpdateEvent(ctx context.Context, req *v1.UpdateEventRequest) (*v1.UpdateEventResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	var title, desc, locName *string
+	if req.Title != nil {
+		title = req.Title
+	}
+	if req.Description != nil {
+		desc = req.Description
+	}
+	if req.LocationName != nil {
+		locName = req.LocationName
+	}
+	locCoords, err := parseCoords(req.LocationCoords)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid location coordinates")
+	}
+	var startsAt *time.Time
+	if req.StartsAt != nil {
+		t := req.StartsAt.AsTime()
+		startsAt = &t
+	}
+	params := &models.UpdateEventParams{
+		Title:          title,
+		Description:    desc,
+		StartsAt:       startsAt,
+		LocationName:   locName,
+		LocationCoords: locCoords,
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	
+	event, err := h.eventService.UpdateEvent(ctx, callerId, eventId, *params)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to update event: %v", err)
+	}
+	eventInfo := eventToProto(&event)
+	response := &v1.UpdateEventResponse{
+		Event: eventInfo,
+	}
+	return response, nil
+	
+}
+
+func (h* EventHandler) CancelEvent (ctx context.Context, req *v1.CancelEventRequest) (*v1.CancelEventResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	_, err = h.eventService.CancelEvent(ctx, callerId, eventId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to cancel event: %v", err)
+	}
+	return &v1.CancelEventResponse{Success: true}, nil
+}
+
+func (h* EventHandler) CreateInviteLink (ctx context.Context, req *v1.CreateInviteLinkRequest) (*v1.CreateInviteLinkResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil {
+		t := req.ExpiresAt.AsTime()
+		expiresAt = &t
+	}
+	
+	code, err := h.eventService.CreateInviteLink(ctx, callerId, eventId, req.InviteType, expiresAt)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to create invite link: %v", err)
+	}
+	return &v1.CreateInviteLinkResponse{EventCode: code}, nil
+}
+
+func (h* EventHandler) JoinEvent (ctx context.Context, req *v1.JoinEventRequest) (*v1.JoinEventResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+
+	success, err := h.eventService.JoinEvent(ctx, callerId, req.EventCode)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to join event: %v", err)
+	}
+	return &v1.JoinEventResponse{Success: success}, nil
+}
+
+func (h* EventHandler) LeaveEvent (ctx context.Context, req *v1.LeaveEventRequest) (*v1.LeaveEventResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	success, err := h.eventService.LeaveEvent(ctx, callerId, eventId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to leave event: %v", err)
+	}
+	return &v1.LeaveEventResponse{Success: success}, nil
+}
+
+func (h* EventHandler) GetEventParticipants (ctx context.Context, req *v1.GetEventParticipantsRequest) (*v1.GetEventParticipantsResponse, error) {
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	participants, err := h.eventService.GetEventParticipants(ctx, eventId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to get event participants: %v", err)
+	}
+	participantsInfo := participantsToProto(participants)
+
+	response := &v1.GetEventParticipantsResponse{
+		Participants: participantsInfo,
+	}
+	return response, nil
+}
+
+func (h* EventHandler) RemoveParticipant (ctx context.Context, req *v1.RemoveParticipantRequest) (*v1.RemoveParticipantResponse, error) {
+	callerId, err := UserIDFromContext(ctx)
+	if err != nil {
+		return nil, status.Errorf(codes.Unauthenticated, "invalid user id")
+	}
+	participantId, err := uuid.Parse(req.ParticipantId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid participant id")
+	}
+	eventId, err := uuid.Parse(req.EventId)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid event id")
+	}
+	success, err := h.eventService.RemoveParticipant(ctx, callerId, participantId, eventId)
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "failed to remove participant: %v", err)
+	}
+	return &v1.RemoveParticipantResponse{Success: success}, nil
 }
