@@ -2,14 +2,17 @@ package app
 
 import (
 	"context"
+	"eventify-events/internal/api"
 	"eventify-events/internal/migrations"
+	"eventify-events/internal/services"
+	v1 "eventify-events/pkg/api/v1"
 	"net"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	//eventRepo "eventify-events/internal/repository/postgres"
+	eventRepo "eventify-events/internal/repository/postgres"
 	"eventify-events/pkg/closer"
 	"eventify-events/pkg/config"
 	"eventify-events/pkg/logger"
@@ -20,6 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
+	"google.golang.org/grpc/reflection"
 
 	googleGrpc "google.golang.org/grpc"
 )
@@ -61,15 +65,17 @@ func NewApp(ctx context.Context) (*App, error) {
 		return nil, fmt.Errorf("app.NewApp migrate: %w", err)
 	}
 
-	// repo := eventRepo.NewEventRepository(pool)
+	repo := eventRepo.NewEventRepository(pool)
 
-	// svc
-	// handler
+	eventSvc := services.NewEventService(repo)
+	checklistSvc := services.NewChecklistService(repo)
 
-	// пустой сервер
-	server := googleGrpc.NewServer()
+	handler := api.NewEventHandler(eventSvc, checklistSvc, logs)
 
-	// api.RegisterEventServiceServer
+	server := googleGrpc.NewServer(googleGrpc.UnaryInterceptor(api.AuthInterceptor()))
+
+	v1.RegisterEventServiceServer(server, handler)
+	reflection.Register(server)
 
 	cl := closer.New()
 
@@ -79,11 +85,11 @@ func NewApp(ctx context.Context) (*App, error) {
 		return nil
 	})
 
-	//cl.Add(func(ctx context.Context) error {
-	//	slog.Info("closing grpc server")
-	//	server.GracefulStop()
-	//	return nil
-	//})
+	cl.Add(func(ctx context.Context) error {
+		slog.Info("closing grpc server")
+		server.GracefulStop()
+		return nil
+	})
 
 	return &App{
 		grpcPort:   cfg.GRPCPort,
