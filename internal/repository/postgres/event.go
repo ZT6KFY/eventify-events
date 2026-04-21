@@ -280,36 +280,23 @@ func (r *EventRepository) CreateInviteLink(ctx context.Context, eventId uuid.UUI
 		maxUses = &val
 	}
 
-	insertSQL, insertArgs, err := r.builder.Insert("event_invites").
+	sql, args, err := r.builder.Insert("event_invites").
 		Columns("event_id", "invite_type", "expires_at", "max_uses").
 		Values(eventId, inviteType, expiresAt, maxUses).
+		Suffix("RETURNING token").
 		ToSql()
 
 	if err != nil {
 		return "", fmt.Errorf("failed to build insert: %w", err)
 	}
 
-	if _, err := r.db.Exec(ctx, insertSQL, insertArgs...); err != nil {
-		return "", fmt.Errorf("failed to insert invite: %w", err)
-	}
-
-	selectSQL, selectArgs, err := r.builder.
-		Select("event_code").
-		From("events").
-		Where(squirrel.Eq{"id": eventId}).
-		ToSql()
-
+	var token string
+	err = r.db.QueryRow(ctx, sql, args...).Scan(&token)
 	if err != nil {
-		return "", fmt.Errorf("failed to build select: %w", err)
+		return "", fmt.Errorf("failed to insert and scan token: %w", err)
 	}
 
-	var eventCode string
-	err = r.db.QueryRow(ctx, selectSQL, selectArgs...).Scan(&eventCode)
-	if err != nil {
-		return "", fmt.Errorf("failed to get event code: %w", err)
-	}
-
-	return eventCode, nil
+	return token, nil
 }
 
 func (r *EventRepository) AddChecklistItem(ctx context.Context, e models.ChecklistItems) (uuid.UUID, error) {
